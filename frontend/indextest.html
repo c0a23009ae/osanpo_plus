@@ -1,83 +1,66 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8" />
-  <title>お散歩++ ルーティング</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta charset="UTF-8">
+<title>お散歩++ ルーティング</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-  <!-- Leaflet -->
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-  />
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<!-- Leaflet -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-  <style>
-    html, body { height: 100%; margin: 0; }
-    #map { height: 100%; }
+<style>
+html, body { height: 100%; margin: 0; }
+#map { height: 100%; }
 
-    .ctrl {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      z-index: 1000;
-      background: white;
-      padding: 10px;
-      border-radius: 10px;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-      width: 260px;
-    }
+.ctrl {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 1000;
+  background: white;
+  padding: 10px;
+  border-radius: 10px;
+  width: 260px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+}
 
-    .ctrl button {
-      margin: 4px 0;
-      width: 100%;
-      padding: 6px;
-      border: none;
-      border-radius: 6px;
-      cursor: pointer;
-      background: #f0f0f0;
-    }
+.ctrl button {
+  width: 100%;
+  margin: 4px 0;
+  padding: 6px;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+}
 
-    .ctrl button:hover {
-      background: #e0e0e0;
-    }
+#search {
+  width: 100%;
+  padding: 6px;
+  margin-bottom: 4px;
+}
 
-    #search {
-      width: 100%;
-      padding: 6px;
-      margin-bottom: 4px;
-      border-radius: 6px;
-      border: 1px solid #ccc;
-    }
+.suggest div {
+  padding: 6px;
+  cursor: pointer;
+  border-bottom: 1px solid #ddd;
+}
+.suggest div:hover {
+  background: #f0f0f0;
+}
 
-    .suggest {
-      border: 1px solid #ccc;
-      border-radius: 6px;
-      max-height: 200px;
-      overflow-y: auto;
-      font-size: 13px;
-    }
-
-    .suggest div {
-      padding: 6px;
-      cursor: pointer;
-    }
-
-    .suggest div:hover {
-      background: #f5f5f5;
-    }
-
-    .s-station { border-left: 6px solid #2196f3; }
-    .s-shop { border-left: 6px solid #4caf50; }
-    .s-tourism { border-left: 6px solid #9c27b0; }
-    .s-other { border-left: 6px solid #9e9e9e; }
-  </style>
+.popup img {
+  width: 220px;
+  margin-top: 6px;
+  border-radius: 6px;
+}
+</style>
 </head>
 
 <body>
 
 <div class="ctrl">
-  <input id="search" placeholder="場所を検索（駅・店・観光地）" />
+  <input id="search" placeholder="場所を検索">
   <div id="suggest" class="suggest"></div>
 
   <button id="startBtn">開始地点</button>
@@ -89,185 +72,227 @@
 <div id="map"></div>
 
 <script>
-  // ==========================
-  // 地図初期化
-  // ==========================
-  const map = L.map("map").setView([35.681236, 139.767125], 14);
+// ==========================
+// 地図
+// ==========================
+const map = L.map("map").setView([35.681236, 139.767125], 14);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 19
+}).addTo(map);
 
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution: "&copy; OpenStreetMap contributors"
-  }).addTo(map);
+// ==========================
+// 状態
+// ==========================
+let mode = null;
+let startMarker = null;
+let goalMarker = null;
+let wayMarkers = [];
+let routeLine = null;
+let poiMarkers = [];
+let shownPOIs = new Set();
 
-  // ==========================
-  // 状態
-  // ==========================
-  let mode = null;
-  let startMarker = null;
-  let goalMarker = null;
-  let wayMarkers = [];
-  let routeLine = null;
+// ==========================
+// ボタン
+// ==========================
+startBtn.onclick = () => mode = "start";
+wayBtn.onclick   = () => mode = "way";
+goalBtn.onclick  = () => mode = "goal";
 
-  // ==========================
-  // ボタン
-  // ==========================
-  startBtn.onclick = () => mode = "start";
-  wayBtn.onclick = () => mode = "way";
-  goalBtn.onclick = () => mode = "goal";
+clearBtn.onclick = () => {
+  startMarker && map.removeLayer(startMarker);
+  goalMarker && map.removeLayer(goalMarker);
+  wayMarkers.forEach(m => map.removeLayer(m));
+  poiMarkers.forEach(m => map.removeLayer(m));
+  routeLine && map.removeLayer(routeLine);
 
-  clearBtn.onclick = () => {
-    if (startMarker) map.removeLayer(startMarker);
-    if (goalMarker) map.removeLayer(goalMarker);
-    wayMarkers.forEach(m => map.removeLayer(m));
-    wayMarkers = [];
-    startMarker = null;
-    goalMarker = null;
-    if (routeLine) map.removeLayer(routeLine);
-  };
+  startMarker = goalMarker = routeLine = null;
+  wayMarkers = [];
+  poiMarkers = [];
+  shownPOIs.clear();
+};
 
-  // ==========================
-  // 地図クリック
-  // ==========================
-  map.on("click", e => placeMarker(e.latlng));
+// ==========================
+// 地図クリック
+// ==========================
+map.on("click", e => placeMarker(e.latlng));
 
-  function placeMarker(latlng) {
-    if (!mode) return;
+function placeMarker(latlng) {
+  if (!mode) return;
 
-    if (mode === "start") {
-      if (startMarker) map.removeLayer(startMarker);
-      startMarker = L.marker(latlng, { icon: redIcon() }).addTo(map);
-    }
-
-    if (mode === "way") {
-      const m = L.marker(latlng, { icon: blueIcon() }).addTo(map);
-      m.on("click", () => {
-        map.removeLayer(m);
-        wayMarkers = wayMarkers.filter(w => w !== m);
-        drawRoute();
-      });
-      wayMarkers.push(m);
-    }
-
-    if (mode === "goal") {
-      if (goalMarker) map.removeLayer(goalMarker);
-      goalMarker = L.marker(latlng, { icon: greenIcon() }).addTo(map);
-    }
-
-    drawRoute();
+  if (mode === "start") {
+    startMarker && map.removeLayer(startMarker);
+    startMarker = L.marker(latlng, { icon: redIcon() }).addTo(map);
   }
 
-  // ==========================
-  // ルーティング（OSRM）
-  // ==========================
-  async function drawRoute() {
-    if (!startMarker || !goalMarker) return;
+  if (mode === "goal") {
+    goalMarker && map.removeLayer(goalMarker);
+    goalMarker = L.marker(latlng, { icon: greenIcon() }).addTo(map);
+  }
 
-    const points = [];
-    const s = startMarker.getLatLng();
-    points.push(`${s.lng},${s.lat}`);
-
-    wayMarkers.forEach(m => {
-      const p = m.getLatLng();
-      points.push(`${p.lng},${p.lat}`);
+  if (mode === "way") {
+    const m = L.marker(latlng, { icon: blueIcon() }).addTo(map);
+    m.on("click", () => {
+      map.removeLayer(m);
+      wayMarkers = wayMarkers.filter(w => w !== m);
+      drawRoute();
     });
-
-    const g = goalMarker.getLatLng();
-    points.push(`${g.lng},${g.lat}`);
-
-    const url =
-      "https://router.project-osrm.org/route/v1/foot/" +
-      points.join(";") +
-      "?overview=full&geometries=geojson";
-
-    const res = await fetch(url);
-    const data = await res.json();
-    if (!data.routes) return;
-
-    const coords = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
-
-    if (routeLine) map.removeLayer(routeLine);
-    routeLine = L.polyline(coords, { color: "purple", weight: 4 }).addTo(map);
+    wayMarkers.push(m);
   }
 
-  // ==========================
-  // 検索＋サジェスト
-  // ==========================
-  const searchBox = document.getElementById("search");
-  const suggestBox = document.getElementById("suggest");
+  drawRoute();
+}
 
-  searchBox.oninput = () => {
-    const q = searchBox.value;
-    if (q.length < 2) {
-      suggestBox.innerHTML = "";
-      return;
-    }
-    fetchSuggest(q);
-  };
+// ==========================
+// ルーティング（OSRM 徒歩）
+// ==========================
+async function drawRoute() {
+  if (!startMarker || !goalMarker) return;
 
-  function classify(item) {
-    if (item.class === "railway") return "station";
-    if (item.class === "amenity" || item.class === "shop") return "shop";
-    if (item.class === "tourism") return "tourism";
-    return "other";
+  const points = [
+    startMarker.getLatLng(),
+    ...wayMarkers.map(m => m.getLatLng()),
+    goalMarker.getLatLng()
+  ];
+
+  const coordStr = points
+    .map(p => `${p.lng},${p.lat}`)
+    .join(";");
+
+  const url =
+    `https://router.project-osrm.org/route/v1/foot/${coordStr}` +
+    `?overview=full&geometries=geojson`;
+
+  const res = await fetch(url);
+  const data = await res.json();
+  if (!data.routes) return;
+
+  const coords = data.routes[0].geometry.coordinates
+    .map(c => [c[1], c[0]]);
+
+  routeLine && map.removeLayer(routeLine);
+  routeLine = L.polyline(coords, { color: "purple", weight: 4 }).addTo(map);
+
+  // 観光スポット更新
+  poiMarkers.forEach(m => map.removeLayer(m));
+  poiMarkers = [];
+  shownPOIs.clear();
+
+  const sampled = coords.filter((_, i) => i % 30 === 0);
+  searchPOIs(sampled);
+}
+
+// ==========================
+// Overpass API
+// ==========================
+function buildOverpassQuery(points, radius = 60) {
+  const q = points.map(p => `
+    node(around:${radius},${p[0]},${p[1]})["tourism"];
+    node(around:${radius},${p[0]},${p[1]})["historic"];
+    node(around:${radius},${p[0]},${p[1]})["leisure"="park"];
+  `).join("");
+
+  return `
+[out:json][timeout:25];
+(
+${q}
+);
+out tags center;
+`;
+}
+
+async function searchPOIs(points) {
+  const query = buildOverpassQuery(points);
+  const res = await fetch(
+    "https://overpass-api.de/api/interpreter",
+    { method: "POST", body: query }
+  );
+  const data = await res.json();
+  showPOIs(data.elements);
+}
+
+// ==========================
+// 観光スポット表示
+// ==========================
+async function showPOIs(elements) {
+  for (const el of elements) {
+    if (!el.lat || !el.lon || shownPOIs.has(el.id)) continue;
+    shownPOIs.add(el.id);
+
+    const tags = el.tags || {};
+    let html = `<div class="popup"><b>${tags.name || "観光スポット"}</b>`;
+
+    if (tags.description) html += `<p>${tags.description}</p>`;
+    if (tags.website)
+      html += `<p><a href="${tags.website}" target="_blank">公式サイト</a></p>`;
+
+    html += `</div>`;
+
+    const m = L.marker([el.lat, el.lon])
+      .addTo(map)
+      .bindPopup(html);
+
+    poiMarkers.push(m);
+  }
+}
+
+// ==========================
+// 検索（Nominatim）
+// ==========================
+search.oninput = async () => {
+  const q = search.value;
+  if (q.length < 2) {
+    suggest.innerHTML = "";
+    return;
   }
 
-  async function fetchSuggest(q) {
-    const url =
-      `https://nominatim.openstreetmap.org/search?` +
-      `q=${encodeURIComponent(q)}&format=json&limit=6`;
+  const url =
+    `https://nominatim.openstreetmap.org/search?` +
+    `q=${encodeURIComponent(q)}&format=json&limit=6`;
 
-    const res = await fetch(url, {
-      headers: { "User-Agent": "osanpo-plus" }
-    });
-    const data = await res.json();
+  const res = await fetch(url, {
+    headers: { "User-Agent": "osanpo-plus" }
+  });
+  const data = await res.json();
 
-    suggestBox.innerHTML = "";
+  suggest.innerHTML = "";
 
-    data.forEach(item => {
-      const type = classify(item);
-      const div = document.createElement("div");
-      div.className = "s-" + type;
+  data.forEach(item => {
+    const div = document.createElement("div");
+    div.textContent = item.display_name;
 
-      const label =
-        type === "station" ? "🚉 駅" :
-        type === "shop" ? "🏪 店" :
-        type === "tourism" ? "🏛 観光" : "📍 その他";
+    div.onclick = () => {
+      const latlng = { lat: +item.lat, lng: +item.lon };
+      map.setView(latlng, 16);
+      placeMarker(latlng);
+      suggest.innerHTML = "";
+      search.value = item.display_name;
+    };
 
-      div.innerHTML = `<strong>${label}</strong><br>${item.display_name}`;
+    suggest.appendChild(div);
+  });
+};
 
-      div.onclick = () => {
-        const latlng = { lat: +item.lat, lng: +item.lon };
-        map.setView(latlng, 16);
-        placeMarker(latlng);
-        suggestBox.innerHTML = "";
-        searchBox.value = item.display_name;
-      };
-
-      suggestBox.appendChild(div);
-    });
-  }
-
-  // ==========================
-  // アイコン
-  // ==========================
-  function redIcon() {
-    return new L.Icon({
-      iconUrl: "https://maps.google.com/mapfiles/ms/icons/red-dot.png",
-      iconSize: [32, 32]
-    });
-  }
-  function blueIcon() {
-    return new L.Icon({
-      iconUrl: "https://maps.google.com/mapfiles/ms/icons/blue-dot.png",
-      iconSize: [32, 32]
-    });
-  }
-  function greenIcon() {
-    return new L.Icon({
-      iconUrl: "https://maps.google.com/mapfiles/ms/icons/green-dot.png",
-      iconSize: [32, 32]
-    });
-  }
+// ==========================
+// アイコン
+// ==========================
+function redIcon() {
+  return new L.Icon({
+    iconUrl: "https://maps.google.com/mapfiles/ms/icons/red-dot.png",
+    iconSize: [32, 32]
+  });
+}
+function blueIcon() {
+  return new L.Icon({
+    iconUrl: "https://maps.google.com/mapfiles/ms/icons/blue-dot.png",
+    iconSize: [32, 32]
+  });
+}
+function greenIcon() {
+  return new L.Icon({
+    iconUrl: "https://maps.google.com/mapfiles/ms/icons/green-dot.png",
+    iconSize: [32, 32]
+  });
+}
 </script>
 
 </body>
