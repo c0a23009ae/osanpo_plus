@@ -1,187 +1,237 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>お散歩++ - Start / Waypoints / Goal ルーティング</title>
+<meta charset="UTF-8">
+<title>お散歩++ 完成版</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-  <!-- Leaflet -->
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-  />
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-
-  <style>
-    html, body { height: 100%; margin: 0; }
-    #map { width: 100%; height: 100%; }
-
-    .ctrl {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      z-index: 900;
-      display: flex;
-      gap: 10px;
-    }
-
-    .ctrl button {
-      padding: 8px 12px;
-      border-radius: 8px;
-      border: none;
-      cursor: pointer;
-      background: white;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-    }
-  </style>
+<!-- Leaflet -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="css/style.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
 
 <body>
 
-  <div class="ctrl">
-    <button id="startBtn">開始地点</button>
-    <button id="wayBtn">経由地点</button>
-    <button id="goalBtn">終了地点</button>
-    <button id="clearBtn">全部削除</button>
-  </div>
+<div class="ctrl">
+  <input id="search" placeholder="場所を検索">
+  <div id="suggest" class="suggest"></div>
 
-  <div id="map"></div>
+  <button id="startBtn">開始地点</button>
+  <button id="wayBtn">経由地点</button>
+  <button id="goalBtn">終了地点</button>
+  <button id="clearBtn">全部削除</button>
 
-  <script>
-    // ==========================
-    // 地図初期化
-    // ==========================
-    const map = L.map("map").setView([35.681236, 139.767125], 14);
+  <div id="info" class="info"></div>
+</div>
 
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19,
-      attribution: "&copy; OpenStreetMap contributors",
-    }).addTo(map);
+<div id="map"></div>
 
-    // ==========================
-    // 状態管理
-    // ==========================
-    let mode = null;
-    let startMarker = null;
-    let goalMarker = null;
-    let wayMarkers = [];
-    let routeLine = null;
+<script>
+// ==========================
+// Map
+// ==========================
+const map = L.map("map").setView([35.681236, 139.767125], 14);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 19
+}).addTo(map);
 
-    // ==========================
-    // ボタン
-    // ==========================
-    document.getElementById("startBtn").onclick = () => mode = "start";
-    document.getElementById("wayBtn").onclick = () => mode = "way";
-    document.getElementById("goalBtn").onclick = () => mode = "goal";
+// ==========================
+// State
+// ==========================
+let mode = null;
+let startMarker = null;
+let goalMarker = null;
+let wayMarkers = [];
+let routeLine = null;
+let poiMarkers = [];
+let shownPOIs = new Set();
 
-    document.getElementById("clearBtn").onclick = () => {
-      if (startMarker) map.removeLayer(startMarker);
-      if (goalMarker) map.removeLayer(goalMarker);
-      wayMarkers.forEach(m => map.removeLayer(m));
-      wayMarkers = [];
-      startMarker = null;
-      goalMarker = null;
+// ==========================
+// Buttons
+// ==========================
+startBtn.onclick = () => mode = "start";
+wayBtn.onclick   = () => mode = "way";
+goalBtn.onclick  = () => mode = "goal";
 
-      if (routeLine) {
-        map.removeLayer(routeLine);
-        routeLine = null;
-      }
-    };
+clearBtn.onclick = () => {
+  [startMarker, goalMarker, routeLine].forEach(m => m && map.removeLayer(m));
+  wayMarkers.forEach(m => map.removeLayer(m));
+  poiMarkers.forEach(m => map.removeLayer(m));
 
-    // ==========================
-    // 地図クリック → マーカー設置
-    // ==========================
-    map.on("click", async (e) => {
-      if (!mode) return;
+  startMarker = goalMarker = routeLine = null;
+  wayMarkers = [];
+  poiMarkers = [];
+  shownPOIs.clear();
+  info.textContent = "";
+};
 
-      if (mode === "start") {
-        if (startMarker) map.removeLayer(startMarker);
-        startMarker = L.marker(e.latlng, { icon: redIcon() }).addTo(map);
-      }
+// ==========================
+// Click map
+// ==========================
+map.on("click", e => placeMarker(e.latlng));
 
-      if (mode === "way") {
-        const m = L.marker(e.latlng, { icon: blueIcon() }).addTo(map);
+function placeMarker(latlng) {
+  if (!mode) return;
 
-        // ★追加：クリックで削除
-        m.on("click", () => {
-          map.removeLayer(m);
-          wayMarkers = wayMarkers.filter(w => w !== m);
-          drawRoute();
-        });
+  if (mode === "start") {
+    startMarker && map.removeLayer(startMarker);
+    startMarker = L.marker(latlng, { icon: redIcon() }).addTo(map);
+  }
 
-        wayMarkers.push(m);
-      }
+  if (mode === "goal") {
+    goalMarker && map.removeLayer(goalMarker);
+    goalMarker = L.marker(latlng, { icon: greenIcon() }).addTo(map);
+  }
 
-      if (mode === "goal") {
-        if (goalMarker) map.removeLayer(goalMarker);
-        goalMarker = L.marker(e.latlng, { icon: greenIcon() }).addTo(map);
-      }
+  if (mode === "way") {
+    addWayMarker(latlng);
+  }
 
+  drawRoute();
+}
+
+function addWayMarker(latlng) {
+  const m = L.marker(latlng, { icon: blueIcon() }).addTo(map);
+  m.on("click", () => {
+    map.removeLayer(m);
+    wayMarkers = wayMarkers.filter(w => w !== m);
+    drawRoute();
+  });
+  wayMarkers.push(m);
+}
+
+// ==========================
+// Routing (OSRM)
+// ==========================
+async function drawRoute() {
+  if (!startMarker || !goalMarker) return;
+
+  const points = [
+    startMarker.getLatLng(),
+    ...wayMarkers.map(m => m.getLatLng()),
+    goalMarker.getLatLng()
+  ];
+
+  const url =
+    `https://router.project-osrm.org/route/v1/foot/` +
+    points.map(p => `${p.lng},${p.lat}`).join(";") +
+    `?overview=full&geometries=geojson`;
+
+  const res = await fetch(url);
+  const data = await res.json();
+  if (!data.routes) return;
+
+  const route = data.routes[0];
+  const coords = route.geometry.coordinates.map(c => [c[1], c[0]]);
+
+  routeLine && map.removeLayer(routeLine);
+  routeLine = L.polyline(coords, { color: "purple", weight: 4 }).addTo(map);
+
+  const km = (route.distance / 1000).toFixed(2);
+  const min = Math.round(route.duration / 60);
+  info.textContent = `距離 ${km} km / 約 ${min} 分`;
+
+  updatePOIs(coords);
+}
+
+// ==========================
+// POI search (Overpass)
+// ==========================
+function buildQuery(points) {
+  return `
+[out:json][timeout:25];
+(
+${points.map(p => `
+  node(around:60,${p[0]},${p[1]})["tourism"];
+  node(around:60,${p[0]},${p[1]})["historic"];
+  node(around:60,${p[0]},${p[1]})["leisure"="park"];
+`).join("")}
+);
+out tags center;
+`;
+}
+
+async function updatePOIs(coords) {
+  poiMarkers.forEach(m => map.removeLayer(m));
+  poiMarkers = [];
+  shownPOIs.clear();
+
+  const sampled = coords.filter((_, i) => i % 30 === 0);
+  const res = await fetch("https://overpass-api.de/api/interpreter", {
+    method: "POST",
+    body: buildQuery(sampled)
+  });
+  const data = await res.json();
+
+  data.elements.forEach(el => {
+    if (!el.lat || !el.lon || shownPOIs.has(el.id)) return;
+    if (!el.tags?.name) return;
+
+    shownPOIs.add(el.id);
+
+    const icon = poiIcon(el.tags);
+    const m = L.marker([el.lat, el.lon], { icon }).addTo(map)
+      .bindPopup(`<b>${el.tags.name}</b><br>${el.tags.tourism || el.tags.historic || "park"}`);
+
+    // ★ ダブルクリックで経由地点に
+    m.on("dblclick", () => {
+      addWayMarker({ lat: el.lat, lng: el.lon });
       drawRoute();
     });
 
-    // ==========================
-    // OSRM ルーティング
-    // ==========================
-    async function drawRoute() {
-      if (!startMarker || !goalMarker) return;
+    poiMarkers.push(m);
+  });
+}
 
-      const points = [];
+// ==========================
+// Search (Nominatim)
+// ==========================
+search.oninput = async () => {
+  if (search.value.length < 2) {
+    suggest.innerHTML = "";
+    return;
+  }
 
-      const s = startMarker.getLatLng();
-      points.push(`${s.lng},${s.lat}`);
+  const res = await fetch(
+    `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(search.value)}&format=json&limit=6`,
+    { headers: { "User-Agent": "osanpo-plus" } }
+  );
+  const data = await res.json();
+  suggest.innerHTML = "";
 
-      wayMarkers.forEach(m => {
-        const p = m.getLatLng();
-        points.push(`${p.lng},${p.lat}`);
-      });
+  data.forEach(item => {
+    const div = document.createElement("div");
+    div.textContent = item.display_name;
+    div.onclick = () => {
+      placeMarker({ lat: +item.lat, lng: +item.lon });
+      map.setView([item.lat, item.lon], 16);
+      suggest.innerHTML = "";
+      search.value = item.display_name;
+    };
+    suggest.appendChild(div);
+  });
+};
 
-      const g = goalMarker.getLatLng();
-      points.push(`${g.lng},${g.lat}`);
+// ==========================
+// Icons
+// ==========================
+const icon = color => new L.Icon({
+  iconUrl: `https://maps.google.com/mapfiles/ms/icons/${color}-dot.png`,
+  iconSize: [32, 32]
+});
 
-      const url =
-        `https://router.project-osrm.org/route/v1/foot/` +
-        points.join(";") +
-        `?overview=full&geometries=geojson`;
+const redIcon   = () => icon("red");
+const blueIcon  = () => icon("blue");
+const greenIcon = () => icon("green");
 
-      try {
-        const res = await fetch(url);
-        const data = await res.json();
-        if (!data.routes) return;
-
-        const coords = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
-
-        if (routeLine) map.removeLayer(routeLine);
-
-        routeLine = L.polyline(coords, { color: "purple", weight: 4 }).addTo(map);
-        map.fitBounds(routeLine.getBounds());
-      } catch (err) {
-        console.error(err);
-      }
-    }
-
-    // ==========================
-    // マーカー色
-    // ==========================
-    function redIcon() {
-      return new L.Icon({
-        iconUrl: "https://maps.google.com/mapfiles/ms/icons/red-dot.png",
-        iconSize: [32, 32],
-      });
-    }
-    function blueIcon() {
-      return new L.Icon({
-        iconUrl: "https://maps.google.com/mapfiles/ms/icons/blue-dot.png",
-        iconSize: [32, 32],
-      });
-    }
-    function greenIcon() {
-      return new L.Icon({
-        iconUrl: "https://maps.google.com/mapfiles/ms/icons/green-dot.png",
-        iconSize: [32, 32],
-      });
-    }
-  </script>
+function poiIcon(tags) {
+  if (tags.tourism) return icon("purple");
+  if (tags.historic) return icon("yellow");
+  if (tags.leisure === "park") return icon("green");
+  return icon("orange");
+}
+</script>
 
 </body>
 </html>

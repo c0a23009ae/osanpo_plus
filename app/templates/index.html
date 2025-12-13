@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>お散歩++</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <!-- Leaflet -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- App CSS -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <script src="{{ url_for('static', filename='js/main.js') }}" defer></script>
+</head>
+
+<body>
+
+<div class="ctrl">
+  <input id="search" placeholder="場所を検索（駅・店・観光地）">
+  <div id="suggest" class="suggest"></div>
+
+  <button id="startBtn">開始地点</button>
+  <button id="wayBtn">経由地点</button>
+  <button id="goalBtn">終了地点</button>
+  <button id="clearBtn">全部削除</button>
+</div>
+
+<div id="map"></div>
+
+</body>
+</html>

@@ -2,78 +2,37 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>お散歩++ ルーティング</title>
+<title>お散歩++ 完成版</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<!-- Leaflet -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="stylesheet" href="css/style.css">
 
-<style>
-html, body { height: 100%; margin: 0; }
-#map { height: 100%; }
-
-.ctrl {
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  z-index: 1000;
-  background: white;
-  padding: 10px;
-  border-radius: 10px;
-  width: 260px;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-}
-
-.ctrl button {
-  width: 100%;
-  margin: 4px 0;
-  padding: 6px;
-  border-radius: 6px;
-  border: none;
-  cursor: pointer;
-}
-
-#search {
-  width: 100%;
-  padding: 6px;
-  margin-bottom: 4px;
-}
-
-.suggest div {
-  padding: 6px;
-  cursor: pointer;
-  border-bottom: 1px solid #ddd;
-}
-.suggest div:hover {
-  background: #f0f0f0;
-}
-
-.popup img {
-  width: 220px;
-  margin-top: 6px;
-  border-radius: 6px;
-}
-</style>
 </head>
 
 <body>
 
 <div class="ctrl">
   <input id="search" placeholder="場所を検索">
-  <div id="suggest" class="suggest"></div>
+  <div id="suggest"></div>
 
   <button id="startBtn">開始地点</button>
   <button id="wayBtn">経由地点</button>
   <button id="goalBtn">終了地点</button>
   <button id="clearBtn">全部削除</button>
+
+  <div id="info" class="info"></div>
+
+  <b>おすすめスポット</b>
+  <div id="poiList" class="poi-list"></div>
 </div>
 
 <div id="map"></div>
 
 <script>
 // ==========================
-// 地図
+// Map
 // ==========================
 const map = L.map("map").setView([35.681236, 139.767125], 14);
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -81,7 +40,7 @@ L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
 }).addTo(map);
 
 // ==========================
-// 状態
+// State
 // ==========================
 let mode = null;
 let startMarker = null;
@@ -92,27 +51,27 @@ let poiMarkers = [];
 let shownPOIs = new Set();
 
 // ==========================
-// ボタン
+// Buttons
 // ==========================
 startBtn.onclick = () => mode = "start";
-wayBtn.onclick   = () => mode = "way";
-goalBtn.onclick  = () => mode = "goal";
+wayBtn.onclick = () => mode = "way";
+goalBtn.onclick = () => mode = "goal";
 
 clearBtn.onclick = () => {
-  startMarker && map.removeLayer(startMarker);
-  goalMarker && map.removeLayer(goalMarker);
+  [startMarker, goalMarker, routeLine].forEach(m => m && map.removeLayer(m));
   wayMarkers.forEach(m => map.removeLayer(m));
   poiMarkers.forEach(m => map.removeLayer(m));
-  routeLine && map.removeLayer(routeLine);
 
   startMarker = goalMarker = routeLine = null;
   wayMarkers = [];
   poiMarkers = [];
   shownPOIs.clear();
+  poiList.innerHTML = "";
+  info.textContent = "";
 };
 
 // ==========================
-// 地図クリック
+// Map click
 // ==========================
 map.on("click", e => placeMarker(e.latlng));
 
@@ -129,21 +88,23 @@ function placeMarker(latlng) {
     goalMarker = L.marker(latlng, { icon: greenIcon() }).addTo(map);
   }
 
-  if (mode === "way") {
-    const m = L.marker(latlng, { icon: blueIcon() }).addTo(map);
-    m.on("click", () => {
-      map.removeLayer(m);
-      wayMarkers = wayMarkers.filter(w => w !== m);
-      drawRoute();
-    });
-    wayMarkers.push(m);
-  }
+  if (mode === "way") addWayMarker(latlng);
 
   drawRoute();
 }
 
+function addWayMarker(latlng) {
+  const m = L.marker(latlng, { icon: blueIcon() }).addTo(map);
+  m.on("click", () => {
+    map.removeLayer(m);
+    wayMarkers = wayMarkers.filter(w => w !== m);
+    drawRoute();
+  });
+  wayMarkers.push(m);
+}
+
 // ==========================
-// ルーティング（OSRM 徒歩）
+// Routing (OSRM)
 // ==========================
 async function drawRoute() {
   if (!startMarker || !goalMarker) return;
@@ -154,144 +115,142 @@ async function drawRoute() {
     goalMarker.getLatLng()
   ];
 
-  const coordStr = points
-    .map(p => `${p.lng},${p.lat}`)
-    .join(";");
-
   const url =
-    `https://router.project-osrm.org/route/v1/foot/${coordStr}` +
+    `https://router.project-osrm.org/route/v1/foot/` +
+    points.map(p => `${p.lng},${p.lat}`).join(";") +
     `?overview=full&geometries=geojson`;
 
   const res = await fetch(url);
   const data = await res.json();
   if (!data.routes) return;
 
-  const coords = data.routes[0].geometry.coordinates
-    .map(c => [c[1], c[0]]);
+  const route = data.routes[0];
+  const coords = route.geometry.coordinates.map(c => [c[1], c[0]]);
 
   routeLine && map.removeLayer(routeLine);
   routeLine = L.polyline(coords, { color: "purple", weight: 4 }).addTo(map);
 
-  // 観光スポット更新
-  poiMarkers.forEach(m => map.removeLayer(m));
-  poiMarkers = [];
-  shownPOIs.clear();
+  info.textContent =
+    `距離 ${(route.distance / 1000).toFixed(2)} km / 約 ${Math.round(route.duration / 60)} 分`;
 
-  const sampled = coords.filter((_, i) => i % 30 === 0);
-  searchPOIs(sampled);
+  updatePOIs(coords);
 }
 
 // ==========================
-// Overpass API
+// POI (Overpass)
 // ==========================
-function buildOverpassQuery(points, radius = 60) {
-  const q = points.map(p => `
-    node(around:${radius},${p[0]},${p[1]})["tourism"];
-    node(around:${radius},${p[0]},${p[1]})["historic"];
-    node(around:${radius},${p[0]},${p[1]})["leisure"="park"];
-  `).join("");
-
+function buildQuery(points) {
   return `
 [out:json][timeout:25];
 (
-${q}
+${points.map(p => `
+  node(around:60,${p[0]},${p[1]})["tourism"];
+  node(around:60,${p[0]},${p[1]})["historic"];
+  node(around:60,${p[0]},${p[1]})["leisure"="park"];
+`).join("")}
 );
 out tags center;
 `;
 }
 
-async function searchPOIs(points) {
-  const query = buildOverpassQuery(points);
-  const res = await fetch(
-    "https://overpass-api.de/api/interpreter",
-    { method: "POST", body: query }
-  );
-  const data = await res.json();
-  showPOIs(data.elements);
-}
+async function updatePOIs(coords) {
+  poiMarkers.forEach(m => map.removeLayer(m));
+  poiMarkers = [];
+  poiList.innerHTML = "";
+  shownPOIs.clear();
 
-// ==========================
-// 観光スポット表示
-// ==========================
-async function showPOIs(elements) {
-  for (const el of elements) {
-    if (!el.lat || !el.lon || shownPOIs.has(el.id)) continue;
+  const sampled = coords.filter((_, i) => i % 30 === 0);
+  const res = await fetch("https://overpass-api.de/api/interpreter", {
+    method: "POST",
+    body: buildQuery(sampled)
+  });
+  const data = await res.json();
+
+  data.elements.forEach(el => {
+    if (!el.lat || !el.lon || !el.tags?.name || shownPOIs.has(el.id)) return;
     shownPOIs.add(el.id);
 
-    const tags = el.tags || {};
-    let html = `<div class="popup"><b>${tags.name || "観光スポット"}</b>`;
+    const type =
+      el.tags.tourism ? "観光" :
+      el.tags.historic ? "史跡" :
+      "公園";
 
-    if (tags.description) html += `<p>${tags.description}</p>`;
-    if (tags.website)
-      html += `<p><a href="${tags.website}" target="_blank">公式サイト</a></p>`;
-
-    html += `</div>`;
-
-    const m = L.marker([el.lat, el.lon])
+    const m = L.marker([el.lat, el.lon], { icon: poiIcon(el.tags) })
       .addTo(map)
-      .bindPopup(html);
+      .bindPopup(`
+<b>${el.tags.name}</b><br>
+${type}スポット<br>
+<small>ダブルクリックで経由地点に追加</small>
+`);
+
+    m.on("dblclick", () => {
+      addWayMarker({ lat: el.lat, lng: el.lon });
+      drawRoute();
+    });
 
     poiMarkers.push(m);
-  }
+
+    const item = document.createElement("div");
+    item.className = "poi-item";
+    item.innerHTML = `
+<span class="badge ${el.tags.tourism ? "b-tourism" : el.tags.historic ? "b-historic" : "b-park"}">
+${type}
+</span>${el.tags.name}`;
+
+    item.onclick = () => {
+      map.setView([el.lat, el.lon], 17);
+      m.openPopup();
+    };
+
+    poiList.appendChild(item);
+  });
 }
 
 // ==========================
-// 検索（Nominatim）
+// Search (Nominatim)
 // ==========================
 search.oninput = async () => {
-  const q = search.value;
-  if (q.length < 2) {
+  if (search.value.length < 2) {
     suggest.innerHTML = "";
     return;
   }
 
-  const url =
-    `https://nominatim.openstreetmap.org/search?` +
-    `q=${encodeURIComponent(q)}&format=json&limit=6`;
-
-  const res = await fetch(url, {
-    headers: { "User-Agent": "osanpo-plus" }
-  });
+  const res = await fetch(
+    `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(search.value)}&format=json&limit=6`,
+    { headers: { "User-Agent": "osanpo-plus" } }
+  );
   const data = await res.json();
-
   suggest.innerHTML = "";
 
   data.forEach(item => {
     const div = document.createElement("div");
     div.textContent = item.display_name;
-
     div.onclick = () => {
-      const latlng = { lat: +item.lat, lng: +item.lon };
-      map.setView(latlng, 16);
-      placeMarker(latlng);
+      placeMarker({ lat: +item.lat, lng: +item.lon });
+      map.setView([item.lat, item.lon], 16);
       suggest.innerHTML = "";
       search.value = item.display_name;
     };
-
     suggest.appendChild(div);
   });
 };
 
 // ==========================
-// アイコン
+// Icons
 // ==========================
-function redIcon() {
-  return new L.Icon({
-    iconUrl: "https://maps.google.com/mapfiles/ms/icons/red-dot.png",
-    iconSize: [32, 32]
-  });
-}
-function blueIcon() {
-  return new L.Icon({
-    iconUrl: "https://maps.google.com/mapfiles/ms/icons/blue-dot.png",
-    iconSize: [32, 32]
-  });
-}
-function greenIcon() {
-  return new L.Icon({
-    iconUrl: "https://maps.google.com/mapfiles/ms/icons/green-dot.png",
-    iconSize: [32, 32]
-  });
+const icon = c => new L.Icon({
+  iconUrl: `https://maps.google.com/mapfiles/ms/icons/${c}-dot.png`,
+  iconSize: [32, 32]
+});
+
+const redIcon = () => icon("red");
+const blueIcon = () => icon("blue");
+const greenIcon = () => icon("green");
+
+function poiIcon(tags) {
+  if (tags.tourism) return icon("purple");
+  if (tags.historic) return icon("yellow");
+  return icon("green");
 }
 </script>
 
