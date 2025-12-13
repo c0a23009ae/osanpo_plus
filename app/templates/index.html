@@ -6,13 +6,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
   <!-- Leaflet -->
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-  />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-  <!-- App CSS -->
+  <!-- App CSS / JS -->
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
   <script src="{{ url_for('static', filename='js/main.js') }}" defer></script>
 </head>
@@ -20,7 +17,7 @@
 <body>
 
 <div class="ctrl">
-  <input id="search" placeholder="場所を検索（駅・店・観光地）">
+  <input id="search" placeholder="場所を検索（例：東京都八王子）">
   <div id="suggest" class="suggest"></div>
 
   <button id="startBtn">開始地点</button>

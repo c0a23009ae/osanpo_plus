@@ -1,5 +1,5 @@
 // ==========================
-// 地図
+// 地図初期化
 // ==========================
 const map = L.map("map").setView([35.681236, 139.767125], 14);
 
@@ -15,6 +15,7 @@ let startMarker = null;
 let goalMarker = null;
 let wayMarkers = [];
 let routeLine = null;
+
 let poiMarkers = [];
 let shownPOIs = new Set();
 
@@ -101,94 +102,129 @@ async function drawRoute() {
   shownPOIs.clear();
 
   const sampled = coords.filter((_, i) => i % 30 === 0);
-  searchPOIs(sampled);
+  fetchPOIs(sampled);
 }
 
 // ==========================
-// Overpass API
+// POI 検索（バックエンド）
 // ==========================
-function buildOverpassQuery(points) {
-  const q = points.map(p => `
-    node(around:80,${p[0]},${p[1]})["tourism"];
-    node(around:80,${p[0]},${p[1]})["historic"];
-    node(around:80,${p[0]},${p[1]})["leisure"="park"];
-  `).join("");
+async function fetchPOIs(points) {
+  const res = await fetch("/api/poi", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ points })
+  });
 
-  return `
-[out:json][timeout:25];
-(
-${q}
-);
-out tags center;
-`;
-}
-
-async function searchPOIs(points) {
-  const res = await fetch(
-    "https://overpass-api.de/api/interpreter",
-    { method: "POST", body: buildOverpassQuery(points) }
-  );
   const data = await res.json();
-  showPOIs(data.elements);
+  showPOIs(data.elements || []);
 }
 
 // ==========================
-// Wikipedia 画像取得
+// POI 表示（Wikipedia 名前検索）
 // ==========================
-async function fetchPlaceImage(name) {
-  const searchUrl =
-    "https://ja.wikipedia.org/w/api.php?" +
-    new URLSearchParams({
-      action: "query",
-      list: "search",
-      srsearch: name,
-      format: "json",
-      origin: "*"
-    });
-
-  const sRes = await fetch(searchUrl);
-  const sData = await sRes.json();
-  if (!sData.query.search.length) return null;
-
-  const pageId = sData.query.search[0].pageid;
-
-  const imgUrl =
-    "https://ja.wikipedia.org/w/api.php?" +
-    new URLSearchParams({
-      action: "query",
-      pageids: pageId,
-      prop: "pageimages",
-      pithumbsize: 400,
-      format: "json",
-      origin: "*"
-    });
-
-  const iRes = await fetch(imgUrl);
-  const iData = await iRes.json();
-
-  const page = iData.query.pages[pageId];
-  return page.thumbnail ? page.thumbnail.source : null;
-}
-
-// ==========================
-// POI 表示
-// ==========================
-async function showPOIs(elements) {
-  for (const el of elements) {
-    if (!el.lat || !el.lon || shownPOIs.has(el.id)) continue;
+function showPOIs(elements) {
+  elements.forEach(el => {
+    if (!el.lat || !el.lon || shownPOIs.has(el.id)) return;
     shownPOIs.add(el.id);
 
-    const name = el.tags?.name || "おすすめスポット";
-    const img = await fetchPlaceImage(name);
+    const tags = el.tags || {};
+    const name = tags.name || "おすすめスポット";
 
-    let html = `<div class="popup"><b>${name}</b>`;
-    if (img) html += `<img src="${img}">`;
-    html += `</div>`;
+    const popup = document.createElement("div");
+    popup.className = "popup";
 
-    const m = L.marker([el.lat, el.lon]).addTo(map).bindPopup(html);
-    poiMarkers.push(m);
-  }
+    const title = document.createElement("b");
+    title.textContent = name;
+    popup.appendChild(title);
+
+    const img = document.createElement("img");
+    img.style.display = "none";
+    popup.appendChild(img);
+
+    const marker = L.marker([el.lat, el.lon]).addTo(map);
+    marker.bindPopup(popup);
+    poiMarkers.push(marker);
+
+    // ===== 画像更新関数 =====
+    const updatePopup = () => {
+      img.style.display = "block";
+      marker.setPopupContent(popup);
+    };
+
+    // ===== 優先順位 =====
+    if (tags.image) {
+      img.src = tags.image;
+      updatePopup();
+      return;
+    }
+
+    if (tags.wikimedia_commons?.startsWith("File:")) {
+      img.src =
+        "https://commons.wikimedia.org/wiki/Special:FilePath/" +
+        encodeURIComponent(tags.wikimedia_commons.replace("File:", ""));
+      updatePopup();
+      return;
+    }
+
+    // ===== Wikipedia 名前検索（本命）=====
+    fetch(
+      `https://ja.wikipedia.org/w/api.php?` +
+      new URLSearchParams({
+        action: "query",
+        format: "json",
+        prop: "pageimages",
+        pithumbsize: 400,
+        generator: "search",
+        gsrsearch: name,
+        origin: "*"
+      })
+    )
+      .then(r => r.json())
+      .then(data => {
+        const pages = data.query?.pages;
+        if (!pages) return;
+
+        const page = Object.values(pages)[0];
+        if (page?.thumbnail?.source) {
+          img.src = page.thumbnail.source;
+          updatePopup();
+        }
+      })
+      .catch(() => {});
+  });
 }
+
+// ==========================
+// 検索（Nominatim）
+// ==========================
+let timer = null;
+search.oninput = () => {
+  clearTimeout(timer);
+  timer = setTimeout(async () => {
+    const q = search.value.trim();
+    if (q.length < 2) {
+      suggest.innerHTML = "";
+      return;
+    }
+
+    const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+    const data = await res.json();
+    suggest.innerHTML = "";
+
+    data.forEach(item => {
+      const div = document.createElement("div");
+      div.textContent = item.display_name;
+      div.onclick = () => {
+        const latlng = { lat: +item.lat, lng: +item.lon };
+        map.setView(latlng, 16);
+        placeMarker(latlng);
+        suggest.innerHTML = "";
+        search.value = item.display_name;
+      };
+      suggest.appendChild(div);
+    });
+  }, 400);
+};
 
 // ==========================
 // アイコン
