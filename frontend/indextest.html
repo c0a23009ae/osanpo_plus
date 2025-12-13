@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>お散歩++ - Start / Waypoints / Goal ルーティング</title>
+  <title>お散歩++ 観光ガイド付きルーティング</title>
 
   <!-- Leaflet -->
   <link
@@ -32,6 +32,12 @@
       cursor: pointer;
       background: white;
       box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+    }
+
+    .popup img {
+      width: 250px;
+      border-radius: 8px;
+      margin-top: 6px;
     }
   </style>
 </head>
@@ -67,6 +73,9 @@
     let wayMarkers = [];
     let routeLine = null;
 
+    let poiMarkers = [];
+    let shownPOIs = new Set();
+
     // ==========================
     // ボタン
     // ==========================
@@ -78,20 +87,22 @@
       if (startMarker) map.removeLayer(startMarker);
       if (goalMarker) map.removeLayer(goalMarker);
       wayMarkers.forEach(m => map.removeLayer(m));
+      poiMarkers.forEach(m => map.removeLayer(m));
+
       wayMarkers = [];
+      poiMarkers = [];
+      shownPOIs.clear();
+
       startMarker = null;
       goalMarker = null;
 
-      if (routeLine) {
-        map.removeLayer(routeLine);
-        routeLine = null;
-      }
+      if (routeLine) map.removeLayer(routeLine);
     };
 
     // ==========================
-    // 地図クリック → マーカー設置
+    // 地図クリック
     // ==========================
-    map.on("click", async (e) => {
+    map.on("click", (e) => {
       if (!mode) return;
 
       if (mode === "start") {
@@ -101,14 +112,11 @@
 
       if (mode === "way") {
         const m = L.marker(e.latlng, { icon: blueIcon() }).addTo(map);
-
-        // ★追加：クリックで削除
         m.on("click", () => {
           map.removeLayer(m);
           wayMarkers = wayMarkers.filter(w => w !== m);
           drawRoute();
         });
-
         wayMarkers.push(m);
       }
 
@@ -121,7 +129,7 @@
     });
 
     // ==========================
-    // OSRM ルーティング
+    // ルート描画（OSRM）
     // ==========================
     async function drawRoute() {
       if (!startMarker || !goalMarker) return;
@@ -144,24 +152,124 @@
         points.join(";") +
         `?overview=full&geometries=geojson`;
 
-      try {
-        const res = await fetch(url);
-        const data = await res.json();
-        if (!data.routes) return;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (!data.routes) return;
 
-        const coords = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
+      const coords = data.routes[0].geometry.coordinates.map(
+        c => [c[1], c[0]]
+      );
 
-        if (routeLine) map.removeLayer(routeLine);
+      if (routeLine) map.removeLayer(routeLine);
+      routeLine = L.polyline(coords, { color: "purple", weight: 4 }).addTo(map);
+      map.fitBounds(routeLine.getBounds());
 
-        routeLine = L.polyline(coords, { color: "purple", weight: 4 }).addTo(map);
-        map.fitBounds(routeLine.getBounds());
-      } catch (err) {
-        console.error(err);
+      poiMarkers.forEach(m => map.removeLayer(m));
+      poiMarkers = [];
+      shownPOIs.clear();
+
+      const sampled = sampleRoute(coords, 30);
+      searchPOIs(sampled);
+    }
+
+    function sampleRoute(coords, step = 30) {
+      return coords.filter((_, i) => i % step === 0);
+    }
+
+    // ==========================
+    // Overpass API
+    // ==========================
+    function buildOverpassQuery(points, radius = 50) {
+      const q = points.map(p => `
+        node(around:${radius},${p[0]},${p[1]})["tourism"];
+        node(around:${radius},${p[0]},${p[1]})["historic"];
+        node(around:${radius},${p[0]},${p[1]})["leisure"="park"];
+      `).join("\n");
+
+      return `
+[out:json][timeout:25];
+(
+${q}
+);
+out tags center;
+`;
+    }
+
+    async function searchPOIs(coords) {
+      const query = buildOverpassQuery(coords);
+      const res = await fetch(
+        "https://overpass-api.de/api/interpreter",
+        { method: "POST", body: query }
+      );
+      const data = await res.json();
+      showPOIs(data.elements);
+    }
+
+    // ==========================
+    // 観光スポット表示（詳細付き）
+    // ==========================
+    async function showPOIs(elements) {
+      for (const el of elements) {
+        if (shownPOIs.has(el.id)) continue;
+        shownPOIs.add(el.id);
+
+        if (!el.lat || !el.lon) continue;
+
+        const tags = el.tags || {};
+        let html = `<div class="popup"><b>${tags.name || "観光スポット"}</b><br>`;
+
+        if (tags.description)
+          html += `<p>${tags.description}</p>`;
+
+        if (tags.opening_hours)
+          html += `<p>🕒 ${tags.opening_hours}</p>`;
+
+        if (tags.website)
+          html += `<p><a href="${tags.website}" target="_blank">公式サイト</a></p>`;
+
+        if (tags.wikipedia) {
+          const title = tags.wikipedia.split(":")[1];
+          html += `<p><a href="https://ja.wikipedia.org/wiki/${title}" target="_blank">Wikipedia</a></p>`;
+        }
+
+        if (tags.wikidata) {
+          const img = await getImageFromWikidata(tags.wikidata);
+          if (img) html += `<img src="${img}">`;
+        }
+
+        html += `</div>`;
+
+        const m = L.marker([el.lat, el.lon])
+          .addTo(map)
+          .bindPopup(html);
+
+        poiMarkers.push(m);
       }
     }
 
     // ==========================
-    // マーカー色
+    // Wikidata → 画像取得
+    // ==========================
+    async function getImageFromWikidata(id) {
+      try {
+        const url = `https://www.wikidata.org/wiki/Special:EntityData/${id}.json`;
+        const res = await fetch(url);
+        const data = await res.json();
+
+        const entity = data.entities[id];
+        const imageName =
+          entity?.claims?.P18?.[0]?.mainsnak?.datavalue?.value;
+
+        if (!imageName) return null;
+
+        return `https://commons.wikimedia.org/wiki/Special:FilePath/${imageName}?width=300`;
+      } catch {
+        return null;
+      }
+    }
+
+    // ==========================
+    // マーカーアイコン
     // ==========================
     function redIcon() {
       return new L.Icon({
