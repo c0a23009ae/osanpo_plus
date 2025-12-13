@@ -1,0 +1,7 @@
+サーバー起動
+python -m http.server 8000
+
+リンク
+http://localhost:8000/frontend
+
+git init
