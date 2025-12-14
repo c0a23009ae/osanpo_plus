@@ -1,66 +1,141 @@
-html, body {
+:root {
+  --primary-color: #0d6efd;
+  --accent-color: #198754;
+}
+
+body, html {
   height: 100%;
   margin: 0;
+  font-family: 'Noto Sans JP', sans-serif;
+  overflow: hidden; /* スクロール防止 */
 }
 
 #map {
   height: 100%;
+  width: 100%;
+  z-index: 1;
 }
 
-/* 操作パネル */
-.ctrl {
+/* コントロールパネル */
+.control-panel {
   position: absolute;
-  top: 10px;
-  left: 10px;
-  z-index: 1000;
-  background: white;
-  padding: 10px;
-  border-radius: 12px;
-  width: 260px;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+  top: 20px;
+  left: 20px;
+  width: 320px;
+  z-index: 1000; /* Leafletの上に表示 */
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.95); /* 透過背景 */
+  backdrop-filter: blur(10px); /* すりガラス効果 */
+  transition: all 0.3s ease;
 }
 
-/* ボタン */
-.ctrl button {
-  width: 100%;
-  margin: 4px 0;
-  padding: 6px;
-  border-radius: 6px;
+/* モバイル対応: 画面下部に配置 */
+@media (max-width: 576px) {
+  .control-panel {
+    top: auto;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    border-radius: 20px 20px 0 0;
+    margin: 0;
+    padding-bottom: 20px; /* iPhoneのホームバー領域考慮 */
+  }
+}
+
+/* サジェストリスト */
+#suggest {
+  max-height: 200px;
+  overflow-y: auto;
+  border-radius: 0 0 8px 8px;
+}
+#suggest .list-group-item {
+  cursor: pointer;
   border: none;
-  cursor: pointer;
+  border-bottom: 1px solid #eee;
+  padding: 10px 15px;
+  font-size: 0.9rem;
+}
+#suggest .list-group-item:hover {
+  background-color: #f8f9fa;
 }
 
-/* 検索 */
-#search {
+/* ローディングオーバーレイ */
+#loadingOverlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.4);
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  backdrop-filter: blur(4px);
+}
+
+/* Leaflet ポップアップのカスタマイズ */
+.leaflet-popup-content-wrapper {
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  padding: 0;
+  overflow: hidden;
+}
+.leaflet-popup-content {
+  margin: 0;
+  width: 260px !important;
+}
+.poi-popup-header {
+  padding: 10px 15px;
+  background: #f8f9fa;
+  border-bottom: 1px solid #eee;
+  font-weight: bold;
+  font-size: 1rem;
+}
+.poi-popup-body {
+  padding: 10px;
+}
+.poi-popup-img {
   width: 100%;
-  padding: 6px;
-  margin-bottom: 4px;
-  box-sizing: border-box;
-}
-
-/* サジェスト */
-.suggest {
-  width: 100%;
-  box-sizing: border-box;
-}
-
-.suggest div {
-  padding: 6px;
-  cursor: pointer;
-  border-bottom: 1px solid #ddd;
-}
-
-.suggest div:hover {
-  background: #f0f0f0;
-}
-
-/* POI ポップアップ */
-.popup {
-  max-width: 240px;
-}
-
-.popup img {
-  width: 100%;
-  margin-top: 6px;
+  height: 150px;
+  object-fit: cover;
   border-radius: 8px;
+  display: none; /* 画像ロード後に表示 */
+  margin-top: 8px;
+  background-color: #eee;
 }
+
+/* カスタムマーカーアイコン (L.divIconで使用) */
+.custom-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: white;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+  font-size: 1.2rem;
+  width: 36px !important;
+  height: 36px !important;
+  margin-left: -18px !important; /* 中央揃え調整 */
+  margin-top: -36px !important;
+  position: relative;
+}
+/* マーカーの足（三角形） */
+.custom-marker::after {
+  content: '';
+  position: absolute;
+  bottom: -6px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-width: 6px 6px 0;
+  border-style: solid;
+  border-color: inherit; /* 親の背景色を引き継ぐ */
+  /* border-color指定はインラインスタイルで行うためここでは不要だが仕組みとして */
+}
+
+.marker-start { background-color: #198754; border-color: #198754 transparent transparent; }
+.marker-start::after { border-top-color: #198754; }
+
+.marker-goal { background-color: #dc3545; border-color: #dc3545 transparent transparent; }
+.marker-goal::after { border-top-color: #dc3545; }
+
+.marker-way { background-color: #0d6efd; border-color: #0d6efd transparent transparent; }
+.marker-way::after { border-top-color: #0d6efd; }
